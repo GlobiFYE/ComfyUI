@@ -261,6 +261,11 @@ class CreateVideo(io.ComfyNode):
         return io.NodeOutput(video)
 
 
+def ordered_segment_names(segments: dict, order: io.VideoConcat.Type | None) -> list[str]:
+    requested = [name for name in dict.fromkeys((order or {}).get("order") or []) if name in segments]
+    return requested + [name for name in segments if name not in requested]
+
+
 class ConcatenateVideo(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -281,6 +286,12 @@ class ConcatenateVideo(io.ComfyNode):
                     ),
                     tooltip="Video segments to concatenate in input order.",
                 ),
+                io.VideoConcat.Input(
+                    "order",
+                    source="videos",
+                    optional=True,
+                    tooltip="Playback order of the connected video segments. Unlisted segments follow in input order.",
+                ),
                 io.Combo.Input(
                     "codec",
                     options=Types.VideoCodec.as_input(),
@@ -300,8 +311,8 @@ class ConcatenateVideo(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, videos: io.Autogrow.Type, codec=None, complete_audio=None) -> io.NodeOutput:
-        videos = [video for group in videos.values() for video in group]
+    def execute(cls, videos: io.Autogrow.Type, order=None, codec=None, complete_audio=None) -> io.NodeOutput:
+        videos = [video for name in ordered_segment_names(videos, order[0] if order else None) for video in videos[name]]
         audio = complete_audio[0] if complete_audio else None
         return io.NodeOutput(InputImpl.VideoFromList(videos, audio, Types.VideoCodec(codec[0] if codec else "auto")))
 

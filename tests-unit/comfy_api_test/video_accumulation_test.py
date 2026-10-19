@@ -11,7 +11,7 @@ import torch
 from comfy_api.input_impl.video_types import VideoFromComponents, VideoFromFile, VideoFromList
 from comfy_api.input.basic_types import AudioInput
 from comfy_api.util.video_types import VideoCodec, VideoComponents
-from comfy_extras.nodes_video import ConcatenateVideo, CreateVideo
+from comfy_extras.nodes_video import ConcatenateVideo, CreateVideo, ordered_segment_names
 
 
 def test_tensor_video_encodes_to_list_owned_buffer():
@@ -47,6 +47,25 @@ def test_accumulate_flattens_groups_and_eagerly_encodes_tensors():
     assert all(reference() is None for reference in references)
 
 
+def test_concatenate_video_follows_order_widget():
+    images = [torch.full((1, 16, 16, 3), value) for value in (0.1, 0.5, 0.9)]
+    videos = [VideoFromComponents(VideoComponents(images=image, frame_rate=Fraction(8))) for image in images]
+    segments = {"video0": [videos[0]], "video1": [videos[1]], "video2": [videos[2]]}
+
+    result = ConcatenateVideo.execute(segments, order=[{"order": ["video2", "missing", "video0", "video2"]}]).result[0]
+    first_pixels = [round(chunk.get_components().images[0, 0, 0, 0].item(), 1) for chunk in result.videos]
+
+    assert first_pixels == [0.9, 0.1, 0.5]
+
+
+def test_ordered_segment_names_falls_back_to_input_order():
+    segments = {"video0": [], "video1": [], "video2": []}
+
+    assert ordered_segment_names(segments, None) == ["video0", "video1", "video2"]
+    assert ordered_segment_names(segments, {}) == ["video0", "video1", "video2"]
+    assert ordered_segment_names(segments, {"order": ["video1"]}) == ["video1", "video0", "video2"]
+
+
 def test_concatenate_video_schema_and_intermediate_codec(monkeypatch):
     encoded_codecs = []
 
@@ -69,6 +88,9 @@ def test_concatenate_video_schema_and_intermediate_codec(monkeypatch):
     assert inputs["videos"].template.input.id == "video"
     assert inputs["videos"].template.input.tooltip
     assert inputs["videos"].template.names[:2] == ["video0", "video1"]
+    assert inputs["order"].as_dict()["source"] == "videos"
+    assert inputs["order"].default == {"order": []}
+    assert inputs["order"].optional
 
 
 def test_create_video_optional_eager_encoding(monkeypatch):
